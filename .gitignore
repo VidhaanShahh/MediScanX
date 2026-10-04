@@ -1,0 +1,50 @@
+# ── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# ── Virtual environments ────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── IDE ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Environment / secrets ──────────────────────────────────────
+.env
+!.env.example
+
+# ── Uploads and generated files ─────────────────────────────────
+uploads/
+test_uploads/
+*.db
+
+# ── OS files ────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Models (binary weights) ────────────────────────────────────
+models/imaging/*.pth
+models/imaging/*.h5
+models/ecg/*.pth
+models/ecg/*.h5
+
+# ── Extracted text (temp) ───────────────────────────────────────
+srs_text.txt
+p3_text.txt
+
+# ── Pytest ──────────────────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage

@@ -1,0 +1,26 @@
+{
+    "model": "PTB-XL-1D-CNN",
+    "model_file": "C:\\Users\\Vidhaan\\OneDrive\\Desktop\\MediScanX\\models\\ecg\\ecg_model.keras",
+    "dataset": "PTB-XL",
+    "dataset_version": "1.0.3",
+    "split": "subset",
+    "evaluation_type": "ecg_classification",
+    "sample_count": 100,
+    "valid_sample_count": 100,
+    "class_count": 5,
+    "valid_class_count": 5,
+    "per_class_auroc": {
+        "NORM": 0.9561403508771931,
+        "MI": 0.9389473684210526,
+        "STTC": 0.9400921658986174,
+        "CD": 0.9438339438339439,
+        "HYP": 0.9759450171821306
+    },
+    "macro_auroc": 0.9509917692425874,
+    "timestamp": "2026-10-02T20:45:02.495691",
+    "preprocessing_description": "M4 ECG preprocessing (bandpass 0.5-40Hz, normalize)",
+    "target_macro_auroc": 0.87,
+    "measured_macro_auroc": 0.9509917692425874,
+    "status": "success",
+    "limitations": "Subset evaluation across folds."
+}
