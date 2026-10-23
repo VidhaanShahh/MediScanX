@@ -36,6 +36,11 @@ from app.api.uploads import router as uploads_router
 from app.api.analysis import router as analysis_router
 from app.api.reports import router as reports_router
 from app.api.admin import router as admin_router
+from app.api.dbms import router as dbms_router
+from app.api.benchmark import router as benchmark_router
+from app.api.integrity import router as integrity_router
+
+
 
 
 @asynccontextmanager
@@ -123,3 +128,8 @@ app.include_router(uploads_router)
 app.include_router(analysis_router)
 app.include_router(reports_router)
 app.include_router(admin_router)
+app.include_router(dbms_router)
+app.include_router(benchmark_router)
+app.include_router(integrity_router)
+
+

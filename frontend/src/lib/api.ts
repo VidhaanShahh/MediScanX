@@ -53,8 +53,34 @@ export interface CaseResponse {
   patient_id: string;
   created_by: string | null;
   status: string;
+  review_status: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface CrossModalConsistencyResponse {
+  id?: string;
+  case_id: string;
+  category: string;
+  explanation: string;
+  source_imaging_finding?: string | null;
+  source_imaging_prob?: number | null;
+  source_ecg_finding?: string | null;
+  source_ecg_prob?: number | null;
+  rule_version: string;
+  requires_human_review: boolean;
+  created_at?: string;
+}
+
+export interface ClinicalReviewResponse {
+  id: string;
+  case_id: string;
+  reviewer_id?: string | null;
+  status: string;
+  findings_summary?: string | null;
+  agreed_with_ai?: boolean | null;
+  notes?: string | null;
+  reviewed_at: string;
 }
 
 export interface CaseDetailResponse extends CaseResponse {
@@ -62,7 +88,10 @@ export interface CaseDetailResponse extends CaseResponse {
   imaging_studies: any[];
   ecg_records: any[];
   predictions: any[];
+  consistency_analyses: CrossModalConsistencyResponse[];
+  reviews: ClinicalReviewResponse[];
 }
+
 
 export interface UploadResponse {
   id: string;
@@ -131,16 +160,49 @@ export interface AnalysisResponse {
   imaging_predictions?: ImagingPredictionResponse;
   ecg_predictions?: ECGPredictionResponse;
   fusion?: FusionResponse;
+  consistency?: CrossModalConsistencyResponse;
   explanations?: ExplanationItem[];
   message: string;
 }
+
 
 export interface ReportResponse {
   id: string;
   case_id: string;
   file_path: string;
+  sha256?: string | null;
   generated_at: string;
   remarks?: string;
+}
+
+export interface IntegrityVerificationResult {
+  entity_id: string;
+  entity_type: string;
+  original_filename?: string | null;
+  is_valid: boolean;
+  file_exists: boolean;
+  recorded_sha256?: string | null;
+  calculated_sha256?: string | null;
+  status: string;
+  message: string;
+}
+
+export interface CaseIntegritySummary {
+  case_id: string;
+  overall_integrity_passed: boolean;
+  total_files_checked: number;
+  files: IntegrityVerificationResult[];
+}
+
+export interface CryptographyDemoResponse {
+  algorithm: string;
+  digest_bit_length: number;
+  digest_hex_length: number;
+  sample_input: string;
+  primary_digest: string;
+  deterministic_verification: any;
+  avalanche_effect_demonstration: any;
+  hashing_vs_encryption_comparison: any;
 }
 
 export interface AuditLogResponse {

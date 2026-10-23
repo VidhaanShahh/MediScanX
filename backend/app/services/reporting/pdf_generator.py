@@ -1,7 +1,7 @@
 import html
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +13,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.orm import Session
 
-from app.models.models import Case, Explanation, ModelVersion, Prediction
+from app.models.models import Case, Explanation, ModelVersion, Prediction, CrossModalConsistency, ClinicalReview
 from app.services.fusion.fusion_service import fuse
 
 NAVY = colors.HexColor("#243746")
@@ -209,8 +209,8 @@ def generate_pdf_report(case: Case, db: Session, save_dir: str = "uploads/report
     styles = _styles()
     output_dir = Path(save_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_id = report_id or f"RPT-{str(case.id).split('-')[0].upper()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-    filename = f"MediScanX_{case.patient.anon_code}_{str(case.id).split('-')[0].upper()}_{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}.pdf"
+    report_id = report_id or f"RPT-{str(case.id).split('-')[0].upper()}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    filename = f"MediScanX_{case.patient.anon_code}_{str(case.id).split('-')[0].upper()}_{datetime.now(timezone.utc).strftime('%Y-%m-%d_%H%M%S')}.pdf"
     file_path = output_dir / filename
     predictions = db.query(Prediction).filter(Prediction.case_id == case.id).all()
     img_preds = [item for item in predictions if item.source == "image"]
@@ -220,7 +220,7 @@ def generate_pdf_report(case: Case, db: Session, save_dir: str = "uploads/report
     fusion = _fusion_data(db, img_preds, ecg_preds, fusion_pred)
     has_image, has_ecg = bool(img_preds), bool(ecg_preds)
     modality = " + ".join(filter(None, ["Chest X-ray" if has_image else "", "12-lead ECG" if has_ecg else ""])) or "Not available"
-    report_date = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    report_date = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     dates = [item.uploaded_at for item in [*case.imaging_studies, *case.ecg_records] if item.uploaded_at]
     examination_date = min(dates).strftime("%Y-%m-%d %H:%M UTC") if dates else "Not available"
 
@@ -251,7 +251,16 @@ def generate_pdf_report(case: Case, db: Session, save_dir: str = "uploads/report
             story.append(Paragraph("Original chest X-ray not available.", styles["small"]))
         study = case.imaging_studies[0] if case.imaging_studies else None
         image_format = Path(study.original_filename or study.file_path if study else "").suffix.upper().lstrip(".") or "Not available"
-        story += [Paragraph("Image quality / validation", styles["subsection"]), _table([[Paragraph("Validation", styles["small"]), Paragraph("Passed", styles["body"])], [Paragraph("Image format", styles["small"]), Paragraph(image_format, styles["body"])], [Paragraph("Quality flag", styles["small"]), Paragraph(_safe(study.quality_flag if study else None), styles["body"])]], [1.8 * inch, 5.1 * inch], False), Paragraph("Model findings", styles["subsection"])]
+        story += [
+            Paragraph("Image quality / validation", styles["subsection"]),
+            _table([
+                [Paragraph("Validation", styles["small"]), Paragraph("Passed", styles["body"])],
+                [Paragraph("Image format", styles["small"]), Paragraph(image_format, styles["body"])],
+                [Paragraph("Quality flag", styles["small"]), Paragraph(_safe(study.quality_flag if study else None), styles["body"])],
+                [Paragraph("SHA-256 Digest", styles["small"]), Paragraph(_safe(study.sha256 if study else "N/A"), styles["body"])],
+            ], [1.8 * inch, 5.1 * inch], False),
+            Paragraph("Model findings", styles["subsection"])
+        ]
         rows = [[Paragraph("Finding", styles["small"]), Paragraph("Model probability", styles["small"]), Paragraph("Threshold / status", styles["small"])]]
         for item in sorted(img_preds, key=lambda value: value.probability, reverse=True):
             rows.append([Paragraph(_safe(item.label), styles["body"]), Paragraph(_fmt_percent(item.probability), styles["body"]), Paragraph("Configured / above" if item.above_threshold else "Configured / below", styles["body"])])
@@ -278,7 +287,19 @@ def generate_pdf_report(case: Case, db: Session, save_dir: str = "uploads/report
         story += [Paragraph("Model traceability", styles["subsection"]), _table([[Paragraph("Model", styles["small"]), Paragraph(_safe(model.name if model else None), styles["body"])], [Paragraph("Model version", styles["small"]), Paragraph(_safe(model.version if model else None), styles["body"])], [Paragraph("Inference time", styles["small"]), Paragraph(_safe(f"{img_preds[0].inference_ms:.1f} ms" if img_preds and img_preds[0].inference_ms is not None else None), styles["body"])], [Paragraph("Preprocessing", styles["small"]), Paragraph("Configured image preprocessing; detailed trace not persisted.", styles["body"])]], [1.8 * inch, 4.9 * inch], False)]
 
     if has_ecg:
-        story += [PageBreak(), Paragraph("5. ECG AI analysis", styles["section"]), Paragraph("ECG model output", styles["subsection"])]
+        ecg_rec = case.ecg_records[0] if case.ecg_records else None
+        story += [
+            PageBreak(),
+            Paragraph("5. ECG AI analysis", styles["section"]),
+            Paragraph("ECG record validation", styles["subsection"]),
+            _table([
+                [Paragraph("Validation", styles["small"]), Paragraph("Passed", styles["body"])],
+                [Paragraph("Leads", styles["small"]), Paragraph(str(ecg_rec.num_leads if ecg_rec else 12), styles["body"])],
+                [Paragraph("Sampling rate", styles["small"]), Paragraph(f"{ecg_rec.sampling_rate} Hz" if ecg_rec and ecg_rec.sampling_rate else "100.0 Hz (standardized)", styles["body"])],
+                [Paragraph("SHA-256 Digest", styles["small"]), Paragraph(_safe(ecg_rec.sha256 if ecg_rec else "N/A"), styles["body"])],
+            ], [1.8 * inch, 5.1 * inch], False),
+            Paragraph("ECG model output", styles["subsection"])
+        ]
         rows = [[Paragraph("Finding", styles["small"]), Paragraph("Probability", styles["small"]), Paragraph("Threshold / status", styles["small"])]]
         for item in sorted(ecg_preds, key=lambda value: value.probability, reverse=True):
             rows.append([Paragraph(_safe(item.label), styles["body"]), Paragraph(_fmt_percent(item.probability), styles["body"]), Paragraph("Configured / above" if item.above_threshold else "Configured / below", styles["body"])])
@@ -313,6 +334,44 @@ def generate_pdf_report(case: Case, db: Session, save_dir: str = "uploads/report
 
     highest_img = max(img_preds, key=lambda value: value.probability) if img_preds else None
     highest_ecg = max(ecg_preds, key=lambda value: value.probability) if ecg_preds else None
-    story += [Paragraph("7. Final AI screening summary", styles["section"]), Paragraph(f"Available analysis: {_safe(modality)}.<br/><br/>The imaging model's highest output was {_safe(highest_img.label) if highest_img else 'not available'} at {_fmt_percent(highest_img.probability) if highest_img else 'not available'}.<br/>The ECG model's highest output was {_safe(highest_ecg.label) if highest_ecg else 'not available'} at {_fmt_percent(highest_ecg.probability) if highest_ecg else 'not available'}.<br/>The resulting configured screening score was {_fmt_score(getattr(fusion, 'fusion_score', None))}, corresponding to the {_safe(getattr(fusion, 'risk_band', None))} screening band.<br/><br/>These outputs represent AI model screening indicators and should not be interpreted as confirmed clinical findings.", styles["body"]), Paragraph("This report does not establish the presence or absence of disease. Clinical review remains necessary, and model attention visualizations should not be treated as radiologist annotations or proof of causality.", styles["disclaimer"])]
+    story += [Paragraph("7. Final AI screening summary", styles["section"]), Paragraph(f"Available analysis: {_safe(modality)}.<br/><br/>The imaging model's highest output was {_safe(highest_img.label) if highest_img else 'not available'} at {_fmt_percent(highest_img.probability) if highest_img else 'not available'}.<br/>The ECG model's highest output was {_safe(highest_ecg.label) if highest_ecg else 'not available'} at {_fmt_percent(highest_ecg.probability) if highest_ecg else 'not available'}.<br/>The resulting configured screening score was {_fmt_score(getattr(fusion, 'fusion_score', None))}, corresponding to the {_safe(getattr(fusion, 'risk_band', None))} screening band.<br/><br/>These outputs represent AI model screening indicators and should not be interpreted as confirmed clinical findings.", styles["body"])]
+
+    # 8. Cross-Modal Consistency & Contradiction Analysis
+    consistency = db.query(CrossModalConsistency).filter(CrossModalConsistency.case_id == case.id).first()
+    if consistency:
+        story += [
+            Paragraph("8. Cross-modal consistency & contradiction analysis", styles["section"]),
+            _table([
+                [Paragraph("Consistency classification", styles["small"]), Paragraph(_safe(consistency.category), styles["body"])],
+                [Paragraph("Clinical explanation", styles["small"]), Paragraph(_safe(consistency.explanation), styles["body"])],
+                [Paragraph("Source imaging finding", styles["small"]), Paragraph(f"{_safe(consistency.source_imaging_finding)} ({_fmt_percent(consistency.source_imaging_prob)})" if consistency.source_imaging_finding else "N/A", styles["body"])],
+                [Paragraph("Source ECG finding", styles["small"]), Paragraph(f"{_safe(consistency.source_ecg_finding)} ({_fmt_percent(consistency.source_ecg_prob)})" if consistency.source_ecg_finding else "N/A", styles["body"])],
+                [Paragraph("Requires human review", styles["small"]), Paragraph("Yes" if consistency.requires_human_review else "No", styles["body"])],
+                [Paragraph("Rule engine version", styles["small"]), Paragraph(_safe(consistency.rule_version), styles["body"])],
+            ], [2.2 * inch, 4.7 * inch], False),
+            Spacer(1, 0.1 * inch),
+        ]
+
+    # 9. Clinical Review Status
+    reviews = db.query(ClinicalReview).filter(ClinicalReview.case_id == case.id).order_by(ClinicalReview.reviewed_at.desc()).all()
+    story += [Paragraph("9. Clinical review & decision status", styles["section"])]
+    if reviews:
+        latest = reviews[0]
+        agreed_str = "Agreed with AI findings" if latest.agreed_with_ai is True else ("Disagreed with AI findings" if latest.agreed_with_ai is False else "No explicit agreement specified")
+        review_rows = [
+            [Paragraph("Review status", styles["small"]), Paragraph(_safe(latest.status), styles["body"])],
+            [Paragraph("Clinician concordance", styles["small"]), Paragraph(agreed_str, styles["body"])],
+            [Paragraph("Reviewer notes", styles["small"]), Paragraph(_safe(latest.notes or "None provided"), styles["body"])],
+            [Paragraph("Review timestamp", styles["small"]), Paragraph(latest.reviewed_at.strftime("%Y-%m-%d %H:%M UTC"), styles["body"])],
+        ]
+        story += [_table(review_rows, [2.2 * inch, 4.7 * inch], False)]
+    else:
+        story += [_table([
+            [Paragraph("Review status", styles["small"]), Paragraph(_safe(case.review_status or "Awaiting Review"), styles["body"])],
+            [Paragraph("Status detail", styles["small"]), Paragraph("No formal clinician review has been submitted yet for this case.", styles["body"])],
+        ], [2.2 * inch, 4.7 * inch], False)]
+
+    story += [Paragraph("Important limitation: This report presents AI model outputs for academic screening and decision-support purposes. It does not establish the presence or absence of disease and should not replace professional clinical assessment.", styles["disclaimer"])]
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer, canvasmaker=NumberedCanvas)
     return str(file_path)
+

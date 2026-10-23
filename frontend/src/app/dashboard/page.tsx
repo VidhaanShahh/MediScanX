@@ -90,6 +90,7 @@ export default function DashboardPage() {
                           <th className="px-6 py-4">Case Name</th>
                           <th className="px-6 py-4">Patient</th>
                           <th className="px-6 py-4">Status</th>
+                          <th className="px-6 py-4">Clinical Review</th>
                           <th className="px-6 py-4">Created</th>
                           <th className="px-6 py-4 text-right">Action</th>
                         </tr>
@@ -112,6 +113,15 @@ export default function DashboardPage() {
                                   {c.status.toUpperCase()}
                                 </span>
                               </td>
+                              <td className="px-6 py-4">
+                                <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                                  c.review_status === "Reviewed" ? "bg-teal-50 text-teal-800 dark:bg-teal-950/40 dark:text-teal-300" :
+                                  c.review_status === "Review Required" ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 font-semibold" :
+                                  "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                                }`}>
+                                  {c.review_status || "Awaiting Review"}
+                                </span>
+                              </td>
                               <td className="px-6 py-4 text-slate-500 text-xs font-medium">{formatDate(c.created_at)}</td>
                               <td className="px-6 py-4 text-right">
                                 <Link href={`/cases/${c.id}`} className="text-slate-900 dark:text-white font-medium hover:underline">
@@ -123,6 +133,7 @@ export default function DashboardPage() {
                         })}
                       </tbody>
                     </table>
+
                   </div>
                 )}
               </div>

@@ -103,6 +103,12 @@ class Case(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
+    review_status = Column(
+        String(50),
+        nullable=False,
+        default="Analysis Pending",
+    )
+
     # relationships
     patient = relationship("Patient", back_populates="cases")
     creator = relationship("User", back_populates="cases")
@@ -117,6 +123,12 @@ class Case(Base):
     )
     reports = relationship(
         "Report", back_populates="case", cascade="all, delete-orphan"
+    )
+    consistency_analyses = relationship(
+        "CrossModalConsistency", back_populates="case", cascade="all, delete-orphan"
+    )
+    reviews = relationship(
+        "ClinicalReview", back_populates="case", cascade="all, delete-orphan"
     )
 
 
@@ -233,6 +245,7 @@ class Report(Base):
         String(36), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
     )
     file_path = Column(String(512), nullable=True)
+    sha256 = Column(String(64), nullable=True)
     remarks = Column(Text, nullable=True)
     generated_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
@@ -274,3 +287,56 @@ class AuditLog(Base):
     timestamp = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     user = relationship("User", back_populates="audit_logs")
+
+
+# ─────────────────────────────────────────────────────────────────
+# Cross-Modal Consistency & Clinical Review Models
+# ─────────────────────────────────────────────────────────────────
+
+class CrossModalConsistency(Base):
+    """
+    Persisted cross-modal contradiction & consistency analysis record.
+    Links CXR and ECG findings for a specific case with clinically defensible rules.
+    """
+    __tablename__ = "cross_modal_consistencies"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    case_id = Column(
+        String(36), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    category = Column(String(50), nullable=False)  # Consistent, Potential Conflict, Insufficient Information, etc.
+    explanation = Column(Text, nullable=False)
+    source_imaging_finding = Column(String(255), nullable=True)
+    source_imaging_prob = Column(Float, nullable=True)
+    source_ecg_finding = Column(String(255), nullable=True)
+    source_ecg_prob = Column(Float, nullable=True)
+    rule_version = Column(String(50), nullable=False, default="v1.0-clinical-rules")
+    requires_human_review = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    case = relationship("Case", back_populates="consistency_analyses")
+
+
+class ClinicalReview(Base):
+    """
+    Clinical review workflow record. Tracks clinician decision, notes,
+    and approval state transitions for cases.
+    """
+    __tablename__ = "clinical_reviews"
+
+    id = Column(String(36), primary_key=True, default=_new_uuid)
+    case_id = Column(
+        String(36), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    reviewer_id = Column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    status = Column(String(50), nullable=False)  # e.g., "Awaiting Review", "Reviewed", "Review Required"
+    findings_summary = Column(Text, nullable=True)
+    agreed_with_ai = Column(Boolean, nullable=True)
+    notes = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    case = relationship("Case", back_populates="reviews")
+    reviewer = relationship("User")
+

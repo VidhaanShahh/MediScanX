@@ -77,6 +77,7 @@ class CaseResponse(BaseModel):
     patient_id: str
     created_by: Optional[str] = None
     status: str
+    review_status: str = "Analysis Pending"
     created_at: datetime
     updated_at: datetime
 
@@ -102,6 +103,9 @@ class CaseDetailResponse(CaseResponse):
     imaging_studies: list["ImagingStudyResponse"] = []
     ecg_records: list["ECGRecordResponse"] = []
     predictions: list[PredictionResponse] = []
+    consistency_analyses: list["CrossModalConsistencyResponse"] = []
+    reviews: list["ClinicalReviewResponse"] = []
+
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -240,12 +244,49 @@ class ExplanationItem(BaseModel):
     model_version: str
 
 
+class CrossModalConsistencyResponse(BaseModel):
+    id: Optional[str] = None
+    case_id: str
+    category: str
+    explanation: str
+    source_imaging_finding: Optional[str] = None
+    source_imaging_prob: Optional[float] = None
+    source_ecg_finding: Optional[str] = None
+    source_ecg_prob: Optional[float] = None
+    rule_version: str
+    requires_human_review: bool
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ClinicalReviewCreate(BaseModel):
+    status: str
+    findings_summary: Optional[str] = None
+    agreed_with_ai: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class ClinicalReviewResponse(BaseModel):
+    id: str
+    case_id: str
+    reviewer_id: Optional[str] = None
+    status: str
+    findings_summary: Optional[str] = None
+    agreed_with_ai: Optional[bool] = None
+    notes: Optional[str] = None
+    reviewed_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class AnalysisResponse(BaseModel):
     case_id: str
     status: str
     imaging_predictions: Optional[ImagingPredictionResponse] = None
     ecg_predictions: Optional[ECGPredictionResponse] = None
     fusion: Optional[FusionResponse] = None
+    consistency: Optional[CrossModalConsistencyResponse] = None
     explanations: Optional[list[ExplanationItem]] = None
     message: str
 
@@ -261,6 +302,8 @@ class ReportResponse(BaseModel):
     id: str
     case_id: str
     file_path: str
+    sha256: Optional[str] = None
     generated_at: datetime
     remarks: Optional[str] = None
+
 

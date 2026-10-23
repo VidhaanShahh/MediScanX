@@ -25,7 +25,7 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.api.deps import get_current_user
 from app.models.models import (
-    User, Case, Prediction, Explanation, ModelVersion, AuditLog,
+    User, Case, Prediction, Explanation, ModelVersion, AuditLog, CrossModalConsistency,
 )
 from app.schemas.schemas import (
     AnalysisResponse,
@@ -35,7 +35,9 @@ from app.schemas.schemas import (
     ECGPredictionResponse,
     FusionResponse,
     ExplanationItem,
+    CrossModalConsistencyResponse,
 )
+from app.services.fusion.cross_modal_service import evaluate_cross_modal_consistency
 from app.services.preprocessing.image import preprocess_image
 from app.services.preprocessing.ecg import preprocess_ecg, load_ecg_csv, load_ecg_wfdb
 from app.services.imaging.chexnet import (
@@ -360,6 +362,57 @@ def analyze_case(
             logger.exception("Unexpected error during M7 fusion")
             messages.append(f"Fusion error: {str(exc)}")
 
+    # ── Cross-Modal Consistency Analysis ──────────────────────────
+    consistency_response = None
+    try:
+        img_prob_map = {p.disease: p.probability for p in imaging_response.predictions} if imaging_response else None
+        ecg_prob_map = {p.superclass: p.probability for p in ecg_response.predictions} if ecg_response else None
+
+        eval_result = evaluate_cross_modal_consistency(img_prob_map, ecg_prob_map)
+
+        # Remove previous consistency analysis for this case to avoid duplicates
+        db.query(CrossModalConsistency).filter(CrossModalConsistency.case_id == case_id).delete()
+
+        consistency_record = CrossModalConsistency(
+            case_id=case_id,
+            category=eval_result.category,
+            explanation=eval_result.explanation,
+            source_imaging_finding=eval_result.source_imaging_finding,
+            source_imaging_prob=eval_result.source_imaging_prob,
+            source_ecg_finding=eval_result.source_ecg_finding,
+            source_ecg_prob=eval_result.source_ecg_prob,
+            rule_version=eval_result.rule_version,
+            requires_human_review=eval_result.requires_human_review,
+        )
+        db.add(consistency_record)
+        db.flush()
+
+        consistency_response = CrossModalConsistencyResponse(
+            id=consistency_record.id,
+            case_id=case_id,
+            category=eval_result.category,
+            explanation=eval_result.explanation,
+            source_imaging_finding=eval_result.source_imaging_finding,
+            source_imaging_prob=eval_result.source_imaging_prob,
+            source_ecg_finding=eval_result.source_ecg_finding,
+            source_ecg_prob=eval_result.source_ecg_prob,
+            rule_version=eval_result.rule_version,
+            requires_human_review=eval_result.requires_human_review,
+            created_at=consistency_record.created_at,
+        )
+
+        # Set review status according to findings
+        if eval_result.requires_human_review:
+            case.review_status = "Review Required"
+        else:
+            case.review_status = "Awaiting Review"
+
+        messages.append(f"Consistency check: {eval_result.category}")
+    except Exception as exc:
+        logger.exception("Cross-modal consistency check failed")
+        messages.append(f"Consistency check non-fatal error: {str(exc)}")
+
+
     # ── M8: Explainability ────────────────────────────────────────
     explanation_items: list[ExplanationItem] = []
     explanations_dir = Path(settings.UPLOAD_DIR) / "explanations" / case_id
@@ -492,6 +545,7 @@ def analyze_case(
         imaging_predictions=imaging_response,
         ecg_predictions=ecg_response,
         fusion=fusion_response,
+        consistency=consistency_response,
         explanations=explanation_items if explanation_items else None,
         message=" | ".join(messages),
     )

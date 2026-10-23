@@ -15,6 +15,13 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [reports, setReports] = useState<ReportResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Clinical Review state
+  const [reviewStatus, setReviewStatus] = useState<string>("Awaiting Review");
+  const [agreedWithAi, setAgreedWithAi] = useState<boolean | null>(true);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewSuccessMsg, setReviewSuccessMsg] = useState("");
   
   // Upload state
   const [xrayFile, setXrayFile] = useState<File | null>(null);
@@ -33,9 +40,54 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
   const [showXrayGradCam, setShowXrayGradCam] = useState(false);
   const [showEcgSaliency, setShowEcgSaliency] = useState(false);
 
+  // Integrity Verification state
+  const [verifyingEntityId, setVerifyingEntityId] = useState<string | null>(null);
+  const [integrityResults, setIntegrityResults] = useState<Record<string, { isValid: boolean; status: string; message: string; calculatedHash?: string }>>({});
+
   useEffect(() => {
     fetchCase();
   }, [caseId]);
+
+  const handleVerifyFileIntegrity = async (entityType: "imaging" | "ecg" | "report", entityId: string) => {
+    setVerifyingEntityId(entityId);
+    try {
+      const res = await api.post(`/api/integrity/verify/${entityType}/${entityId}`);
+      setIntegrityResults(prev => ({
+        ...prev,
+        [entityId]: {
+          isValid: res.data.is_valid,
+          status: res.data.status,
+          message: res.data.message,
+          calculatedHash: res.data.calculated_sha256,
+        }
+      }));
+    } catch (err: any) {
+      alert("Integrity verification failed: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setVerifyingEntityId(null);
+    }
+  };
+
+  const handleSubmitReview = async () => {
+    setSubmittingReview(true);
+    setReviewSuccessMsg("");
+    try {
+      await api.post(`/api/cases/${caseId}/reviews`, {
+        status: reviewStatus,
+        findings_summary: `Clinician assessment: ${agreedWithAi ? "Agreed with AI findings" : "Disagreed with AI findings"}`,
+        agreed_with_ai: agreedWithAi,
+        notes: reviewNotes,
+      });
+      setReviewSuccessMsg("Clinical review recorded in audit trail successfully.");
+      setReviewNotes("");
+      await fetchCase();
+    } catch (err: any) {
+      alert("Failed to submit review: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
 
   const fetchCase = async () => {
     setIsLoading(true);
@@ -120,7 +172,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
   const handleDownloadReport = async (reportId: string) => {
     try {
       const res = await api.get(`/api/reports/download/${reportId}`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', `report_${reportId}.pdf`);
@@ -131,6 +183,17 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
       console.error("Download failed", err);
     }
   };
+
+  const handleViewReport = async (reportId: string) => {
+    try {
+      const res = await api.get(`/api/reports/view/${reportId}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error("View failed", err);
+    }
+  };
+
 
   if (isLoading) {
     return (
@@ -260,8 +323,34 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
                       </button>
                     </>
                   )}
-                  {hasImage && (
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Validated image available in this case.</p>
+                  {hasImage && caseDetail.imaging_studies?.[0] && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-slate-600 dark:text-slate-400">Validated image available in this case.</p>
+                      <div className="rounded border border-slate-200 bg-slate-50 p-2.5 text-xs dark:border-slate-800 dark:bg-slate-900/40">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">SHA-256 Digest:</span>
+                          <button
+                            onClick={() => handleVerifyFileIntegrity("imaging", caseDetail.imaging_studies[0].id)}
+                            disabled={verifyingEntityId === caseDetail.imaging_studies[0].id}
+                            className="font-medium text-teal-700 hover:underline dark:text-teal-400 text-xs"
+                          >
+                            {verifyingEntityId === caseDetail.imaging_studies[0].id ? "Checking..." : "Verify Digest"}
+                          </button>
+                        </div>
+                        <p className="font-mono text-[11px] text-slate-600 dark:text-slate-400 break-all select-all">
+                          {caseDetail.imaging_studies[0].sha256}
+                        </p>
+                        {integrityResults[caseDetail.imaging_studies[0].id] && (
+                          <div className={`mt-2 p-1.5 rounded text-[11px] font-medium ${
+                            integrityResults[caseDetail.imaging_studies[0].id].isValid
+                              ? "bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800"
+                              : "bg-red-50 text-red-800 border border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-800"
+                          }`}>
+                            {integrityResults[caseDetail.imaging_studies[0].id].message}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -305,8 +394,34 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
                       </button>
                     </>
                   )}
-                  {hasEcg && (
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Validated waveform available in this case.</p>
+                  {hasEcg && caseDetail.ecg_records?.[0] && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-slate-600 dark:text-slate-400">Validated waveform available in this case.</p>
+                      <div className="rounded border border-slate-200 bg-slate-50 p-2.5 text-xs dark:border-slate-800 dark:bg-slate-900/40">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">SHA-256 Digest:</span>
+                          <button
+                            onClick={() => handleVerifyFileIntegrity("ecg", caseDetail.ecg_records[0].id)}
+                            disabled={verifyingEntityId === caseDetail.ecg_records[0].id}
+                            className="font-medium text-teal-700 hover:underline dark:text-teal-400 text-xs"
+                          >
+                            {verifyingEntityId === caseDetail.ecg_records[0].id ? "Checking..." : "Verify Digest"}
+                          </button>
+                        </div>
+                        <p className="font-mono text-[11px] text-slate-600 dark:text-slate-400 break-all select-all">
+                          {caseDetail.ecg_records[0].sha256}
+                        </p>
+                        {integrityResults[caseDetail.ecg_records[0].id] && (
+                          <div className={`mt-2 p-1.5 rounded text-[11px] font-medium ${
+                            integrityResults[caseDetail.ecg_records[0].id].isValid
+                              ? "bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800"
+                              : "bg-red-50 text-red-800 border border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-800"
+                          }`}>
+                            {integrityResults[caseDetail.ecg_records[0].id].message}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -395,6 +510,68 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
               </div>
             </div>
           )}
+
+          {/* CROSS-MODAL CONTRADICTION & CONSISTENCY ANALYSIS */}
+          {(analysis?.consistency || (caseDetail.consistency_analyses && caseDetail.consistency_analyses.length > 0)) && (
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <div>
+                  <span className="text-xs font-semibold tracking-wider uppercase text-teal-700 dark:text-teal-400">Cross-Modal Clinical Evaluation</span>
+                  <h3 className="text-lg font-bold text-slate-950 dark:text-white mt-0.5">Cross-Modal Consistency & Contradiction Analysis</h3>
+                </div>
+                {(() => {
+                  const cons = analysis?.consistency || caseDetail.consistency_analyses[0];
+                  const isConflict = cons.category === "POTENTIAL CROSS-MODAL CONFLICT";
+                  const isReviewReq = cons.category === "REVIEW REQUIRED";
+                  const isConsistent = cons.category === "CONSISTENT OR COMPATIBLE FINDINGS";
+                  return (
+                    <span className={cn(
+                      "px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider",
+                      isConflict ? "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border border-red-200 dark:border-red-800" :
+                      isReviewReq ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800" :
+                      isConsistent ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" :
+                      "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300"
+                    )}>
+                      {cons.category}
+                    </span>
+                  );
+                })()}
+              </div>
+
+              {(() => {
+                const cons = analysis?.consistency || caseDetail.consistency_analyses[0];
+                return (
+                  <div className="space-y-3">
+                    <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-slate-950/50 p-3.5 rounded border border-slate-100 dark:border-slate-800">
+                      <strong>Clinical Rationale: </strong>{cons.explanation}
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
+                      <div className="p-2.5 rounded bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
+                        <span className="text-slate-400 block font-medium">CXR Indicator</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {cons.source_imaging_finding || "N/A"} {cons.source_imaging_prob ? `(${(cons.source_imaging_prob * 100).toFixed(1)}%)` : ""}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
+                        <span className="text-slate-400 block font-medium">ECG Indicator</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {cons.source_ecg_finding || "N/A"} {cons.source_ecg_prob ? `(${(cons.source_ecg_prob * 100).toFixed(1)}%)` : ""}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800">
+                        <span className="text-slate-400 block font-medium">Human Review Flag</span>
+                        <span className={cn("font-semibold", cons.requires_human_review ? "text-amber-600 dark:text-amber-400" : "text-slate-700 dark:text-slate-300")}>
+                          {cons.requires_human_review ? "Yes — Escalation Advised" : "Standard Review"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
 
           {/* 7 & 8. CHEST X-RAY WORKSPACE */}
           {hasImage && (
@@ -562,6 +739,116 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
             </p>
           </div>
 
+          {/* CLINICAL REVIEW WORKFLOW PANEL */}
+          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+              <div>
+                <span className="text-xs font-semibold tracking-wider uppercase text-teal-700 dark:text-teal-400">Clinical Governance & Decision Support</span>
+                <h3 className="text-lg font-bold text-slate-950 dark:text-white mt-0.5">Clinical Review & Case Disposition</h3>
+              </div>
+              <span className={cn(
+                "px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider",
+                caseDetail.review_status === "Reviewed" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" :
+                caseDetail.review_status === "Review Required" ? "bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border border-red-200 dark:border-red-800" :
+                "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+              )}>
+                {caseDetail.review_status || "Awaiting Review"}
+              </span>
+            </div>
+
+            {/* Review submission form */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-950/60 p-4 rounded-md border border-slate-200 dark:border-slate-800">
+              <div className="space-y-3">
+                <label className="text-xs font-medium text-slate-700 dark:text-slate-300 block">
+                  Review Status Transition
+                  <select
+                    value={reviewStatus}
+                    onChange={(e) => setReviewStatus(e.target.value)}
+                    className="mt-1 block w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  >
+                    <option value="Reviewed">Reviewed (Mark Case as Reviewed)</option>
+                    <option value="Awaiting Review">Awaiting Review</option>
+                    <option value="Review Required">Review Required (Escalate)</option>
+                  </select>
+                </label>
+
+                <div>
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 block mb-1.5">Clinician Concurrence with AI Findings</span>
+                  <div className="flex gap-4">
+                    <label className="inline-flex items-center gap-2 text-xs text-slate-800 dark:text-slate-200 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="concurrence"
+                        checked={agreedWithAi === true}
+                        onChange={() => setAgreedWithAi(true)}
+                        className="text-teal-600 focus:ring-teal-500"
+                      />
+                      Agree with AI findings
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-xs text-slate-800 dark:text-slate-200 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="concurrence"
+                        checked={agreedWithAi === false}
+                        onChange={() => setAgreedWithAi(false)}
+                        className="text-teal-600 focus:ring-teal-500"
+                      />
+                      Disagree / Discordant
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="text-xs font-medium text-slate-700 dark:text-slate-300 block">
+                  Clinician Remarks & Action Plan
+                  <textarea
+                    rows={3}
+                    value={reviewNotes}
+                    onChange={(e) => setReviewNotes(e.target.value)}
+                    placeholder="Enter clinical rationale, recommendations, or confirmation of non-acute status..."
+                    className="mt-1 block w-full rounded border border-slate-300 bg-white p-2.5 text-sm text-slate-900 shadow-sm focus:border-teal-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  />
+                </label>
+
+                <div className="flex justify-end items-center gap-3">
+                  {reviewSuccessMsg && (
+                    <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{reviewSuccessMsg}</span>
+                  )}
+                  <button
+                    onClick={handleSubmitReview}
+                    disabled={submittingReview}
+                    className="rounded-md bg-teal-700 hover:bg-teal-800 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors disabled:opacity-50"
+                  >
+                    {submittingReview ? "Recording Review..." : "Submit Review"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Historical reviews list */}
+            {caseDetail.reviews && caseDetail.reviews.length > 0 && (
+              <div className="pt-2">
+                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Review Audit History</h4>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                  {caseDetail.reviews.map((r) => (
+                    <div key={r.id} className="py-2.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5">
+                      <div>
+                        <span className="font-semibold text-slate-900 dark:text-white mr-2">[{r.status}]</span>
+                        <span className="text-slate-600 dark:text-slate-400">
+                          {r.agreed_with_ai === true ? "Agreed with AI" : (r.agreed_with_ai === false ? "Disagreed with AI" : "Unspecified")}
+                          {r.notes ? ` — "${r.notes}"` : ""}
+                        </span>
+                      </div>
+                      <span className="text-slate-400 shrink-0">{formatDate(r.reviewed_at)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+
           {/* 18. REPORTING */}
           <div className="border-y border-slate-200 py-5 dark:border-slate-800">
             <div className="mb-5 flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
@@ -585,6 +872,7 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
                   <thead className="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800">
                     <tr>
                       <th className="px-6 py-4 font-medium">Report ID</th>
+                      <th className="px-6 py-4 font-medium">SHA-256 Digest</th>
                       <th className="px-6 py-4 font-medium">Generated At</th>
                       <th className="px-6 py-4 font-medium text-right">Actions</th>
                     </tr>
@@ -593,13 +881,36 @@ export default function CaseWorkspacePage({ params }: { params: Promise<{ id: st
                     {reports.map((report) => (
                       <tr key={report.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                         <td className="px-6 py-4 font-mono text-slate-700 dark:text-slate-300">{report.id}</td>
+                        <td className="px-6 py-4 font-mono text-[11px] text-slate-500 max-w-[200px] truncate" title={report.sha256 || "Legacy report without recorded digest"}>
+                          {report.sha256 ? `${report.sha256.slice(0, 16)}...` : "None"}
+                          {integrityResults[report.id] && (
+                            <span className={`block mt-1 text-[10px] font-sans font-semibold ${
+                              integrityResults[report.id].isValid ? "text-emerald-600" : "text-red-600"
+                            }`}>
+                              [{integrityResults[report.id].status}]
+                            </span>
+                          )}
+                        </td>
                         <td className="px-6 py-4 text-slate-600 dark:text-slate-400">{formatDate(report.generated_at)}</td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-6 py-4 text-right space-x-3">
+                          <button
+                            onClick={() => handleVerifyFileIntegrity("report", report.id)}
+                            disabled={verifyingEntityId === report.id}
+                            className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white font-medium text-xs uppercase tracking-wide"
+                          >
+                            {verifyingEntityId === report.id ? "Checking..." : "Verify Hash"}
+                          </button>
+                          <button
+                            onClick={() => handleViewReport(report.id)}
+                            className="text-teal-700 dark:text-teal-400 font-semibold hover:underline text-xs uppercase tracking-wide"
+                          >
+                            View / Print
+                          </button>
                           <button
                             onClick={() => handleDownloadReport(report.id)}
                             className="text-slate-900 dark:text-white font-medium hover:underline text-xs uppercase tracking-wide"
                           >
-                            Download
+                            Download PDF
                           </button>
                         </td>
                       </tr>

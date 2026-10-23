@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, LayoutDashboard, Users, FileStack, FileText, Shield, LogOut, Sun, Moon } from "lucide-react";
+import { Activity, LayoutDashboard, Users, FileStack, FileText, Database, Shield, LogOut, Sun, Moon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
@@ -13,7 +13,9 @@ const navigation = [
   { name: "Patients", href: "/patients", icon: Users },
   { name: "Cases", href: "/cases", icon: FileStack },
   { name: "Reports", href: "/reports", icon: FileText },
+  { name: "DBMS Explorer", href: "/dbms", icon: Database },
 ];
+
 
 export function Sidebar() {
   const pathname = usePathname();

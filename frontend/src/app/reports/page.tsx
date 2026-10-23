@@ -39,7 +39,7 @@ export default function ReportsPage() {
   const handleDownloadReport = async (reportId: string) => {
     try {
       const res = await api.get(`/api/reports/download/${reportId}`, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', `report_${reportId}.pdf`);
@@ -48,6 +48,16 @@ export default function ReportsPage() {
       link.remove();
     } catch (err) {
       console.error("Download failed", err);
+    }
+  };
+
+  const handleViewReport = async (reportId: string) => {
+    try {
+      const res = await api.get(`/api/reports/view/${reportId}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error("View failed", err);
     }
   };
 
@@ -94,6 +104,7 @@ export default function ReportsPage() {
                 <tr>
                   <th className="px-6 py-4">Report ID</th>
                   <th className="px-6 py-4">Case ID</th>
+                  <th className="px-6 py-4">SHA-256 Digest</th>
                   <th className="px-6 py-4">Generated At</th>
                   <th className="px-6 py-4 text-right">Actions</th>
                 </tr>
@@ -107,13 +118,22 @@ export default function ReportsPage() {
                         {report.case_id}
                       </Link>
                     </td>
+                    <td className="px-6 py-4 font-mono text-[11px] text-slate-500 max-w-[200px] truncate" title={report.sha256 || "Legacy report without recorded digest"}>
+                      {report.sha256 ? `${report.sha256.slice(0, 16)}...` : "None"}
+                    </td>
                     <td className="px-6 py-4 text-slate-500 text-xs font-medium">{formatDate(report.generated_at)}</td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-6 py-4 text-right space-x-3">
+                      <button
+                        onClick={() => handleViewReport(report.id)}
+                        className="text-teal-700 dark:text-teal-400 font-semibold hover:underline text-xs uppercase tracking-wide"
+                      >
+                        View / Print
+                      </button>
                       <button
                         onClick={() => handleDownloadReport(report.id)}
-                        className="text-sm font-medium text-slate-900 dark:text-white hover:underline text-xs uppercase tracking-wide"
+                        className="text-slate-900 dark:text-white font-medium hover:underline text-xs uppercase tracking-wide"
                       >
-                        Download
+                        Download PDF
                       </button>
                     </td>
                   </tr>
@@ -126,3 +146,4 @@ export default function ReportsPage() {
     </div>
   );
 }
+
