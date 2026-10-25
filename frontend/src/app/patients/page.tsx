@@ -20,21 +20,43 @@ export default function PatientsPage() {
   const [createError, setCreateError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
-      const [pRes, cRes] = await Promise.all([
+      const [pRes, cRes] = await Promise.allSettled([
         api.get("/api/patients"),
         api.get("/api/cases"),
       ]);
-      setPatients(pRes.data);
-      setCases(cRes.data);
-    } catch (err) {
-      console.error("Failed to load patients", err);
+
+      const errors: string[] = [];
+
+      if (pRes.status === "fulfilled") {
+        setPatients(pRes.value.data);
+      } else {
+        console.error("Failed to load patients", pRes.reason);
+        errors.push("Failed to load patients");
+      }
+
+      if (cRes.status === "fulfilled") {
+        setCases(cRes.value.data);
+      } else {
+        console.error("Failed to load cases", cRes.reason);
+        errors.push("Failed to load cases");
+      }
+
+      if (errors.length > 0) {
+        setLoadError(errors.join(" and "));
+      }
+    } catch (err: any) {
+      console.error("Failed to load patient workspace", err);
+      setLoadError("An unexpected error occurred while loading patient records.");
     } finally {
       setIsLoading(false);
     }
@@ -71,9 +93,13 @@ export default function PatientsPage() {
     }
   };
 
-  const filteredPatients = patients.filter(p => 
-    p.anon_code.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredPatients = patients.filter((p) => {
+    const query = search.trim().toLowerCase();
+    if (!query) return true;
+    const nameMatch = p.full_name ? p.full_name.toLowerCase().includes(query) : false;
+    const codeMatch = p.anon_code ? p.anon_code.toLowerCase().includes(query) : false;
+    return nameMatch || codeMatch;
+  });
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
@@ -90,6 +116,14 @@ export default function PatientsPage() {
         </button>
       </div>
 
+      {loadError && (
+        <div className="rounded-md bg-red-50 p-4 border border-red-200 dark:bg-red-950/40 dark:border-red-900/50">
+          <div className="text-sm text-red-700 dark:text-red-400">
+            <span className="font-semibold">Notice:</span> {loadError}. Please check server connectivity.
+          </div>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center bg-slate-50 dark:bg-slate-950">
           <div className="relative w-full max-w-md">
@@ -98,7 +132,7 @@ export default function PatientsPage() {
             </div>
             <input
               type="text"
-              placeholder="Search patients by code..."
+              placeholder="Search patients by name or ID code..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 w-full px-4 py-2 text-sm border border-slate-300 dark:border-slate-700 rounded-md focus:ring-1 focus:ring-slate-400 focus:border-slate-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-white transition-all outline-none"

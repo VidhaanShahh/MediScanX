@@ -30,6 +30,7 @@ router = APIRouter(prefix="/api", tags=["cases"])
 
 
 @router.post("/cases", response_model=CaseResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/cases/", response_model=CaseResponse, status_code=status.HTTP_201_CREATED)
 def create_case(
     body: CaseCreate,
     db: Session = Depends(get_db),
@@ -52,6 +53,7 @@ def create_case(
 
 
 @router.get("/cases", response_model=list[CaseResponse])
+@router.get("/cases/", response_model=list[CaseResponse])
 def list_cases(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),

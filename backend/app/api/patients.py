@@ -20,6 +20,7 @@ from app.schemas.schemas import PatientCreate, PatientResponse
 router = APIRouter(prefix="/api/patients", tags=["patients"])
 
 
+@router.post("", response_model=PatientResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=PatientResponse, status_code=status.HTTP_201_CREATED)
 def create_patient(
     body: PatientCreate,
@@ -76,6 +77,7 @@ def delete_patient(
     db.commit()
 
 
+@router.get("", response_model=list[PatientResponse])
 @router.get("/", response_model=list[PatientResponse])
 def list_patients(
     skip: int = Query(0, ge=0),

@@ -12,17 +12,40 @@ export default function DashboardPage() {
   const [cases, setCases] = useState<CaseResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     const fetchData = async () => {
+      setIsLoading(true);
+      setError(null);
       try {
-        const [pRes, cRes] = await Promise.all([
+        const [pRes, cRes] = await Promise.allSettled([
           api.get("/api/patients"),
           api.get("/api/cases"),
         ]);
-        setPatients(pRes.data);
-        setCases(cRes.data);
-      } catch (err) {
+
+        const errors: string[] = [];
+
+        if (pRes.status === "fulfilled") {
+          setPatients(pRes.value.data);
+        } else {
+          console.error("Failed to load patients", pRes.reason);
+          errors.push("Failed to load patients");
+        }
+
+        if (cRes.status === "fulfilled") {
+          setCases(cRes.value.data);
+        } else {
+          console.error("Failed to load cases", cRes.reason);
+          errors.push("Failed to load cases");
+        }
+
+        if (errors.length > 0) {
+          setError(errors.join(" and "));
+        }
+      } catch (err: any) {
         console.error("Failed to load dashboard data", err);
+        setError("An unexpected error occurred while loading dashboard data.");
       } finally {
         setIsLoading(false);
       }
@@ -41,6 +64,16 @@ export default function DashboardPage() {
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">Dashboard</h1>
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-md bg-red-50 p-4 border border-red-200 dark:bg-red-950/40 dark:border-red-900/50">
+          <div className="flex">
+            <div className="text-sm text-red-700 dark:text-red-400">
+              <span className="font-semibold">Notice:</span> {error}. Please check your connection or sign in again.
+            </div>
+          </div>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="flex h-64 items-center justify-center">

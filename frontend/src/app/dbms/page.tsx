@@ -47,25 +47,47 @@ export default function DatabaseExplorerPage() {
   const [txVerifying, setTxVerifying] = useState(false);
   const [txResult, setTxResult] = useState<any>(null);
 
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     fetchStatsAndCatalog();
   }, []);
 
   const fetchStatsAndCatalog = async () => {
     setLoadingStats(true);
+    setError(null);
     try {
-      const [sRes, qRes] = await Promise.all([
+      const [sRes, qRes] = await Promise.allSettled([
         api.get("/api/dbms/stats"),
         api.get("/api/dbms/queries"),
       ]);
-      setStats(sRes.data);
-      setQueries(qRes.data);
-      if (qRes.data.length > 0 && !selectedKey) {
-        setSelectedKey(qRes.data[0].key);
-        runQuery(qRes.data[0].key);
+
+      const errors: string[] = [];
+
+      if (sRes.status === "fulfilled") {
+        setStats(sRes.value.data);
+      } else {
+        console.error("Failed to load DBMS stats", sRes.reason);
+        errors.push("Failed to load database operational statistics");
       }
-    } catch (err) {
+
+      if (qRes.status === "fulfilled") {
+        setQueries(qRes.value.data);
+        if (qRes.value.data.length > 0 && !selectedKey) {
+          setSelectedKey(qRes.value.data[0].key);
+          runQuery(qRes.value.data[0].key);
+        }
+      } else {
+        console.error("Failed to load DBMS queries catalog", qRes.reason);
+        errors.push("Failed to load predefined query catalog");
+      }
+
+      if (errors.length > 0) {
+        setError(errors.join(" and "));
+      }
+    } catch (err: any) {
       console.error("Failed to load DBMS stats", err);
+      setError("An unexpected error occurred while communicating with the database explorer.");
     } finally {
       setLoadingStats(false);
     }
@@ -119,6 +141,14 @@ export default function DatabaseExplorerPage() {
           <RefreshCw className="h-3.5 w-3.5" /> Refresh Live Metrics
         </button>
       </div>
+
+      {error && (
+        <div className="rounded-md bg-red-50 p-4 border border-red-200 dark:bg-red-950/40 dark:border-red-900/50">
+          <div className="text-sm text-red-700 dark:text-red-400">
+            <span className="font-semibold">Notice:</span> {error}. Please verify server authentication or connectivity.
+          </div>
+        </div>
+      )}
 
       {/* Live Operational Database Metrics Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

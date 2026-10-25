@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = False
 
-    DATABASE_URL: str = "sqlite:///./mediscanx_dev.db"
+    DATABASE_URL: str = f"sqlite:///{(Path(__file__).resolve().parents[3] / 'mediscanx_dev.db').as_posix()}"
 
     SECRET_KEY: str = "CHANGE-ME-IN-PRODUCTION"
     JWT_ALGORITHM: str = "HS256"

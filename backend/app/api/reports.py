@@ -14,23 +14,66 @@ import uuid
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
+@router.get("", response_model=list[ReportResponse])
+@router.get("/", response_model=list[ReportResponse])
+def get_all_reports(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """List all reports accessible to the user (admins see all, normal users see own cases)."""
+    if current_user.role == "admin":
+        return db.query(Report).order_by(Report.generated_at.desc()).all()
+    return (
+        db.query(Report)
+        .join(Case, Report.case_id == Case.id)
+        .filter(Case.created_by == current_user.id)
+        .order_by(Report.generated_at.desc())
+        .all()
+    )
+
+
 @router.get("/case/{case_id}", response_model=list[ReportResponse])
 def list_reports(case_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return db.query(Report).filter(Report.case_id == case_id).order_by(Report.generated_at.desc()).all()
+
+def _resolve_report_path(file_path_str: str) -> Path:
+    """Resolve report path against CWD and repo root."""
+    p = Path(file_path_str)
+    if p.is_file():
+        return p
+    # Try resolving relative to repository root (one level above backend)
+    repo_root = Path(__file__).resolve().parents[3]
+    candidate = repo_root / file_path_str
+    if candidate.is_file():
+        return candidate
+    # Try resolving relative to backend directory
+    backend_dir = Path(__file__).resolve().parents[2]
+    candidate_backend = backend_dir / file_path_str
+    if candidate_backend.is_file():
+        return candidate_backend
+    return p
+
 
 @router.get("/download/{report_id}")
 def download_report(report_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     report = db.query(Report).filter(Report.id == report_id).first()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-    if not Path(report.file_path).exists():
+    
+    # Check authorization: user must own the case or be admin
+    case = db.query(Case).filter(Case.id == report.case_id).first()
+    if case and case.created_by and case.created_by != current_user.id and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access or download this report."
+        )
+
+    resolved_path = _resolve_report_path(report.file_path)
+    if not resolved_path.is_file():
         raise HTTPException(status_code=404, detail="PDF file not found on disk")
     
     db.add(AuditLog(user_id=current_user.id, action="download_report", target_id=report_id))
     db.commit()
 
     return FileResponse(
-        report.file_path,
+        str(resolved_path),
         media_type='application/pdf',
         filename=f"report_{report.id}.pdf",
         headers={"Content-Disposition": f"attachment; filename=report_{report.id}.pdf"}
@@ -43,14 +86,24 @@ def view_report_inline(report_id: str, db: Session = Depends(get_db), current_us
     report = db.query(Report).filter(Report.id == report_id).first()
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-    if not Path(report.file_path).exists():
+    
+    # Check authorization: user must own the case or be admin
+    case = db.query(Case).filter(Case.id == report.case_id).first()
+    if case and case.created_by and case.created_by != current_user.id and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access or view this report."
+        )
+
+    resolved_path = _resolve_report_path(report.file_path)
+    if not resolved_path.is_file():
         raise HTTPException(status_code=404, detail="PDF file not found on disk")
     
     db.add(AuditLog(user_id=current_user.id, action="view_report", target_id=report_id))
     db.commit()
 
     return FileResponse(
-        report.file_path,
+        str(resolved_path),
         media_type='application/pdf',
         headers={"Content-Disposition": f"inline; filename=report_{report.id}.pdf"}
     )

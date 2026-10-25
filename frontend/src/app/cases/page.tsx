@@ -22,20 +22,42 @@ export default function CasesPage() {
   const [createError, setCreateError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const fetchData = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
-      const [cRes, pRes] = await Promise.all([
+      const [cRes, pRes] = await Promise.allSettled([
         api.get("/api/cases"),
         api.get("/api/patients"),
       ]);
-      setCases(cRes.data);
-      setPatients(pRes.data);
-      if (pRes.data.length > 0) {
-        setSelectedPatientId(pRes.data[0].id);
+
+      const errors: string[] = [];
+
+      if (cRes.status === "fulfilled") {
+        setCases(cRes.value.data);
+      } else {
+        console.error("Failed to load cases", cRes.reason);
+        errors.push("Failed to load cases");
       }
-    } catch (err) {
+
+      if (pRes.status === "fulfilled") {
+        setPatients(pRes.value.data);
+        if (pRes.value.data.length > 0) {
+          setSelectedPatientId(pRes.value.data[0].id);
+        }
+      } else {
+        console.error("Failed to load patients", pRes.reason);
+        errors.push("Failed to load patients");
+      }
+
+      if (errors.length > 0) {
+        setLoadError(errors.join(" and "));
+      }
+    } catch (err: any) {
       console.error("Failed to load cases", err);
+      setLoadError("An unexpected error occurred while loading cases.");
     } finally {
       setIsLoading(false);
     }
@@ -63,15 +85,27 @@ export default function CasesPage() {
     }
   };
 
+  const getPatient = (id: string) => {
+    return patients.find(p => p.id === id);
+  };
+
   const getPatientCode = (id: string) => {
-    const p = patients.find(p => p.id === id);
+    const p = getPatient(id);
     return p ? p.anon_code : id.slice(0, 8);
   };
 
-  const filteredCases = cases.filter(c => 
-    c.id.toLowerCase().includes(search.toLowerCase()) ||
-    getPatientCode(c.patient_id).toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredCases = cases.filter((c) => {
+    const query = search.trim().toLowerCase();
+    if (!query) return true;
+
+    const patient = getPatient(c.patient_id);
+    const caseIdMatch = c.id.toLowerCase().includes(query);
+    const caseNameMatch = c.name ? c.name.toLowerCase().includes(query) : false;
+    const patientCodeMatch = patient?.anon_code ? patient.anon_code.toLowerCase().includes(query) : false;
+    const patientNameMatch = patient?.full_name ? patient.full_name.toLowerCase().includes(query) : false;
+
+    return caseIdMatch || caseNameMatch || patientCodeMatch || patientNameMatch;
+  });
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
@@ -88,6 +122,14 @@ export default function CasesPage() {
         </button>
       </div>
 
+      {loadError && (
+        <div className="rounded-md bg-red-50 p-4 border border-red-200 dark:bg-red-950/40 dark:border-red-900/50">
+          <div className="text-sm text-red-700 dark:text-red-400">
+            <span className="font-semibold">Notice:</span> {loadError}. Please check server connectivity.
+          </div>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
         <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center bg-slate-50 dark:bg-slate-950">
           <div className="relative w-full max-w-md">
@@ -96,7 +138,7 @@ export default function CasesPage() {
             </div>
             <input
               type="text"
-              placeholder="Search by Case ID or Patient Code..."
+              placeholder="Search by Case Name, Patient Name, Case ID, or Code..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 w-full px-4 py-2 text-sm border border-slate-300 dark:border-slate-700 rounded-md focus:ring-1 focus:ring-slate-400 focus:border-slate-400 bg-white dark:bg-slate-900 text-slate-900 dark:text-white transition-all outline-none"
